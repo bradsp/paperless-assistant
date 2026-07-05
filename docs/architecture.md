@@ -218,8 +218,5 @@ observable behavior.
 
 - [Advanced modes](advanced-modes.md) — the operator-facing guide to hosted (Mode B),
   hosted inference, direct connection (Mode C), and the control-plane component.
-- [`plan/product-architecture.md`](../plan/product-architecture.md) — the full
-  product architecture and phased roadmap.
-- [`plan/connectivity-design.md`](../plan/connectivity-design.md) — the agent
-  protocol and connectivity/security deep-dive.
-- `docs/phase{3..7}-acceptance.md` — the per-phase live-stack acceptance runbooks.
+- `docs/phase3-acceptance.md` … `docs/phase7-acceptance.md` — the per-phase
+  live-stack acceptance runbooks, in the repository.

@@ -1,0 +1,75 @@
+name: Sync docs to wiki
+
+# Mirror docs/ into the GitHub Wiki whenever the docs change on main. The wiki is
+# a SEPARATE git repo (paperless-assistant.wiki.git); scripts/docs_to_wiki.py
+# renames each doc to its wiki page and rewrites links for that separate repo.
+#
+# The wiki is a GENERATED MIRROR of docs/ — edit the docs, not the wiki (manual
+# wiki edits to managed pages are overwritten on the next sync).
+#
+# Requires the wiki to have been initialized once (a first page created via the
+# web UI) so the .wiki.git repo exists.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'scripts/docs_to_wiki.py'
+      - '.github/workflows/sync-wiki.yml'
+  workflow_dispatch:
+
+# Only one wiki sync at a time; a newer docs push supersedes an in-flight one.
+concurrency:
+  group: sync-wiki
+  cancel-in-progress: true
+
+permissions:
+  contents: write        # push to the repo's wiki via GITHUB_TOKEN
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build wiki pages from docs/
+        run: |
+          python scripts/docs_to_wiki.py \
+            --out wiki-build \
+            --repo "${GITHUB_REPOSITORY}" \
+            --branch main
+
+      - name: Publish to the wiki
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The wiki repo must already exist (initialized once via the web UI).
+          if ! git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki; then
+            echo "::error::Could not clone the wiki repo. Initialize the wiki once (create a first page in the web UI), then re-run."
+            exit 1
+          fi
+
+          # Mirror: replace all managed pages, drop wiki pages that no longer
+          # correspond to a doc. Preserves the wiki's own .git.
+          rsync -a --delete --exclude='.git' wiki-build/ wiki/
+
+          cd wiki
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Wiki already up to date."
+            exit 0
+          fi
+          git add -A
+          git commit -m "Sync wiki from docs/ @ ${GITHUB_SHA::7}"
+          git push
+          echo "Wiki synced."
