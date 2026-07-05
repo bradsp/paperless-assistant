@@ -1,0 +1,38 @@
+name: CI
+
+# Run the offline test suite on every push and pull request. The suite needs no
+# live Paperless, no real API keys, and no Ollama server, so it runs fast and free.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# Cancel an in-progress run when a newer commit is pushed to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python = ">=3.10"; test the supported range.
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package + test and provider extras
+        run: pip install -e ".[test,openai,ollama]"
+
+      - name: Run tests
+        run: pytest -q

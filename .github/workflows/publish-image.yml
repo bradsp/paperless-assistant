@@ -1,0 +1,93 @@
+name: Publish container image
+
+# Build the container image and publish it to the GitHub Container Registry
+# (GHCR, ghcr.io). This replaces the previous Docker Hub publishing flow.
+#
+# - Tag pushes matching v*.*.* (e.g. v0.1.0) publish a released image.
+# - Pull requests that touch the build inputs are built (but NOT pushed) so a
+#   broken Dockerfile is caught before merge.
+# - workflow_dispatch lets you trigger a manual build from the Actions tab.
+#
+# The published image is  ghcr.io/<owner>/<repo>  (e.g. ghcr.io/bradsp/paperless-assistant).
+# GITHUB_TOKEN is used for auth — no Docker Hub credentials / secrets required.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'pyproject.toml'
+      - 'src/**'
+      - '.github/workflows/publish-image.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Gate: never publish an image whose own offline suite is red.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install package + test/provider extras
+        run: pip install -e ".[test,openai,ollama]"
+      - name: Run the offline test suite
+        run: pytest -q
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # required to push to GHCR
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        # Skip on pull_request: PRs from forks have a read-only token and must not push.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # v0.1.0 -> tags 0.1.0, 0.1, and latest (latest auto-applied to the
+          # highest semver tag). A plain manual/PR build gets a short-sha tag.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Pure-python image, so multi-arch is cheap and lets people run it on
+          # ARM boxes (Raspberry Pi, ARM servers) as well as x86.
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Speed up rebuilds via the GitHub Actions cache.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

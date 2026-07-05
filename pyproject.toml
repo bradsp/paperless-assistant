@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paperless-assistant"
+version = "0.1.0"
+description = "AI companion for Paperless-NGX: OCR-quality triage, vision re-OCR, and metadata extraction. Docker companion (MVP): onboarding, layered config, scheduled sweeps."
+readme = "README.md"
+requires-python = ">=3.10"
+# GPL-3.0-or-later. The modern PEP 639 SPDX form (`license = "GPL-3.0-or-later"`)
+# needs setuptools >= 77; this project pins an older build backend, so the
+# table form is used for compatibility. The trove classifier below is the
+# machine-readable license marker for PyPI/tooling.
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "BP Technology Advisors LLC", email = "bradspowers@outlook.com" }]
+maintainers = [{ name = "BP Technology Advisors LLC", email = "bradspowers@outlook.com" }]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Intended Audience :: System Administrators",
+    "Topic :: Utilities",
+    "Environment :: Console",
+]
+dependencies = [
+    "requests>=2.28",
+    "anthropic>=0.40",
+    "pypdf>=4.0",
+    "reportlab>=4.0",
+    "pillow>=10.0",
+    "jsonschema>=4.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# BYO-key provider extras. The Anthropic path needs none of these; the OpenAI
+# and Ollama adapters import-guard their clients so the core still runs without
+# them installed.
+openai = [
+    "openai>=1.30",
+]
+ollama = [
+    "httpx>=0.24",
+]
+test = [
+    "pytest>=8.0",
+    "responses>=0.25",
+]
+
+[project.scripts]
+pa = "paperless_assistant.cli:main"
+# Vendor-side control plane (Phase 5). Separate console script + package to keep
+# the trust boundary visible: the agent (`pa`) never runs this.
+pa-control-plane = "paperless_control_plane.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

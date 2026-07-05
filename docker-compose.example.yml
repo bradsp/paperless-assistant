@@ -1,0 +1,107 @@
+# Paperless Assistant - compose add-on snippet (plan §8.1).
+#
+# Add this `paperless-assistant` service to your EXISTING Paperless-NGX
+# docker-compose.yml (the same file that already defines `webserver`, `db`,
+# `broker`, ...). It joins the compose network and reaches Paperless by its
+# in-stack service name over the LAN.
+#
+# Secrets come from the environment / your `.env` file, NEVER from a committed
+# config. `pa init` prints this same block.
+#
+# NOTE: there is deliberately NO `ports:` mapping - the agent exposes nothing to
+# the host. It is outbound-only (talks to Paperless on the LAN and, in BYO-key
+# mode, to your chosen AI provider).
+
+services:
+  paperless-assistant:
+    image: ghcr.io/bradsp/paperless-assistant:latest
+    depends_on: [webserver]              # the paperless-ngx service
+    environment:
+      PAPERLESS_URL: http://webserver:8000       # in-stack service name, LAN-internal
+      PAPERLESS_TOKEN: ${PAPERLESS_ASSISTANT_TOKEN}   # scoped service-user token (NOT admin)
+      PA_MODE: byo-key                            # BYO-key: you supply the AI key
+      # AI provider + model default to Anthropic and are chosen in the dashboard
+      # (Settings -> Models). Set PA_METADATA_PROVIDER / PA_OCR_PROVIDER here only
+      # to PIN them -- that env-locks the field (dashboard shows it read-only).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}     # byo-key only; never in YAML
+      # Optional tuning (safe defaults apply if unset):
+      # PA_REOCR_ENABLED: "false"                 # re-OCR is OFF by default (opt-in)
+      # PA_SPEND_PER_RUN: "1.00"                  # low, non-zero per-run cap
+      # PA_SPEND_PER_PERIOD: "5.00"               # low, non-zero per-period cap
+      # PA_SCHEDULE_INTERVAL: "3600"              # `pa serve` sweep interval (seconds)
+      #
+      # --- On-ingest webhook NUDGE receiver (Phase 4, opt-in) ---------------
+      # Enable near-real-time processing of newly-consumed docs. The receiver
+      # binds INSIDE this compose network on port 8765; Paperless reaches it by
+      # SERVICE NAME (http://paperless-assistant:8765/hooks/paperless). There is
+      # deliberately still NO `ports:` mapping - it is NOT exposed to the host.
+      # Configure a Paperless Workflow -> Webhook action (trigger: "Document
+      # Consumption Finished"/"Updated", NOT "Added") pointing at that in-network
+      # URL with ?token=${PA_WEBHOOK_SECRET} and body {"doc_url": "{doc_url}"}.
+      # See docs/phase4-acceptance.md. The scheduled sweep stays authoritative.
+      # PA_WEBHOOK_ENABLED: "true"
+      # PA_WEBHOOK_SECRET: ${PA_WEBHOOK_SECRET}   # env only; NEVER in the YAML config
+      # PA_WEBHOOK_PORT: "8765"                   # in-network only (no host port)
+      #
+      # --- Web dashboard (Phase 8, opt-in) — PUBLISHED, token-protected ----
+      # A browser dashboard to observe + operate the agent: view status/stats/
+      # runs/errors, start manual sweeps (dry-run/write/re-OCR/limit/max-spend),
+      # and edit the layered-config tunables. UNLIKE everything else here, the UI
+      # is a DELIBERATELY-PUBLISHED host port — so it is protected by a built-in
+      # token (PA_UI_TOKEN, env only). If enabled with NO token it refuses to
+      # start (fail closed). To enable it, uncomment the ports mapping below AND:
+      # PA_UI_ENABLED: "true"
+      # PA_UI_TOKEN: ${PA_UI_TOKEN}               # env only; NEVER in the YAML config
+      # PA_UI_PORT: "8770"                        # container port the UI binds
+      #
+      # --- HOSTED mode (Phase 5, Mode B) — OUTBOUND-ONLY -------------------
+      # Instead of BYO-key local scheduling above, run the agent in HOSTED mode:
+      # it dials OUT to a vendor control plane, PULLS work (long-poll), runs it
+      # locally against LAN Paperless with YOUR OWN AI provider (inference stays
+      # BYO this phase — the control plane does NOT run or bill inference), and
+      # PUSHES results. The control plane NEVER connects into your network; there
+      # is still NO `ports:` mapping and NO inbound listener. To use hosted mode,
+      # set PA_MODE=hosted (replacing byo-key), and:
+      #   PA_CONTROL_PLANE_URL: https://control-plane.example   # the endpoint you dial OUT to
+      #   PA_ENROLLMENT_TOKEN: ${PA_ENROLLMENT_TOKEN}           # one-time; env ONLY, never YAML
+      # On first start the agent exchanges the one-time enrollment token for a
+      # long-lived, rotatable agent credential persisted under /data (never
+      # logged, never in YAML). The Paperless token and AI key NEVER leave your
+      # network — only the agent credential authenticates to the control plane.
+      # Then run `command: ["serve"]` (below) as usual. See docs/phase5-acceptance.md.
+      #   PA_HEARTBEAT_INTERVAL: "60"                           # heartbeat cadence (seconds)
+      #
+      # --- HOSTED INFERENCE (Phase 6, Mode B, subscriber) — NO LOCAL AI KEY -
+      # The commercial path: run hosted mode with NO AI key of your own. AI tasks
+      # are performed by the VENDOR's inference proxy (control-plane side), metered
+      # to your subscription and capped server-side. To use it, set PA_MODE=hosted
+      # as above, DO NOT set ANTHROPIC_API_KEY / OPENAI_API_KEY (the whole point),
+      # and turn on the inference toggle:
+      #   PA_HOSTED_INFERENCE: "true"                           # route AI via the proxy
+      #   # PA_HOSTED_METADATA_MODEL: "..."                     # optional non-secret hint
+      #   # PA_HOSTED_OCR_MODEL: "..."                          # optional non-secret hint
+      # PRIVACY / TRUST MODEL (honest): in this mode document CONTENTS transit the
+      # inference proxy for the model call ONLY, and are NOT persisted server-side
+      # (logs record routing/usage metadata only). If you want ZERO egress of
+      # document content to any cloud, use BYO-key with LOCAL Ollama instead — that
+      # remains the default privacy floor. The vendor's model key stays SERVER-SIDE
+      # and never reaches this agent. See docs/phase6-acceptance.md.
+      #
+      # NOTE: hosted inference activates ONLY when PA_MODE=hosted AND
+      # PA_HOSTED_INFERENCE=true AND no local AI key is set. If you keep a local key,
+      # BYO inference is used and nothing goes to the vendor (zero-egress preserved).
+    volumes:
+      - ./pa-data:/data                           # snapshots, config, run reports, cursor
+    restart: unless-stopped
+    # Run scheduled sweeps unattended (the first run defaults to a dry-run report).
+    # Add "--webhook" to also start the in-network nudge receiver (requires
+    # PA_WEBHOOK_SECRET), e.g. command: ["serve", "--webhook"]. When PA_UI_ENABLED
+    # is set, `serve` ALSO starts the web dashboard thread in this same container.
+    command: ["serve"]
+    # NOTE: by default no `ports:` - the agent exposes nothing to the host, INCLUDING
+    # the webhook nudge receiver (reachable only in-network by service name) AND
+    # hosted mode (outbound-only: it dials OUT to the control plane and binds no
+    # inbound listener). The ONLY thing you publish is the OPT-IN web dashboard —
+    # uncomment the mapping below when PA_UI_ENABLED + PA_UI_TOKEN are set:
+    # ports:
+    #   - "8770:8770"                             # host:container — the token-protected dashboard

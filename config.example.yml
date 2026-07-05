@@ -1,0 +1,225 @@
+# Paperless Assistant - example config (plan §7). Mount this at /data/config.yml.
+#
+# Resolution order (low -> high precedence, plan §7.1):
+#   built-in safe defaults  <  THIS YAML file  <  environment variables  <  CLI flags
+#
+# SECRETS DO NOT GO HERE. The Paperless token, AI provider keys, and the agent
+# token come ONLY from environment variables / secret files. `pa` REFUSES to load
+# a config file that contains a secret-looking key (paperless_token, api_key,
+# anthropic_api_key, openai_api_key, agent_token, token, secret).
+#
+# Every value below is OPTIONAL - omitting it keeps the safe default (§7.2).
+
+# --- external URL for browser links ---------------------------------------
+# The agent talks to Paperless over the LAN via PAPERLESS_URL (e.g.
+# http://webserver:8000) - keep that as the in-stack service name. But that URL
+# is NOT reachable from a browser, so links in the dashboard (the Activity log's
+# document links) would be broken. Set the EXTERNAL URL a browser uses here (or
+# via the PAPERLESS_PUBLIC_URL env var); it is used ONLY to build UI links.
+# Blank -> fall back to PAPERLESS_URL.
+# paperless_public_url: https://paperless.example
+
+# --- global posture -------------------------------------------------------
+mode: conservative            # conservative / review-first (you opt into aggressiveness)
+
+# --- which stages are enabled (§7.2) --------------------------------------
+triage_enabled: true          # score OCR quality (local, free)
+metadata_enabled: true        # propose AI metadata
+reocr_enabled: false          # AUTO RE-OCR IS OFF BY DEFAULT - opt in per library
+                              # (it spends money and rewrites documents)
+
+# --- thresholds (§7.2/§7.3) -----------------------------------------------
+triage_threshold: 0.55        # score >= this flags a doc for re-OCR
+garbage_threshold: 0.55       # metadata skips docs at/above this (they need re-OCR first)
+
+# --- concurrency (§7.2: 3-4, <= DB pool) ----------------------------------
+workers: 3
+
+# --- spend caps (§7.2: low, non-zero; I3) ---------------------------------
+spend:
+  per_run: 1.00               # USD hard-abort cap per run
+  per_period: 5.00            # USD cap across the period below (unattended safety)
+  period: monthly             # daily | weekly | monthly
+
+# --- per-task provider/model + PROMPT customization ----------------------
+# `model` accepts a curated id (see the dashboard's model dropdown / /api/models)
+# OR any custom id (free-text). Pick a VISION-capable model for the OCR task — a
+# text-only model is refused at run time (and the dashboard warns early).
+#
+# PROMPT customization (prompt 010) — NON-secret, two levers per task, over the
+# natural-language INSTRUCTION only (the JSON schema the engine validates is FIXED
+# and never customizable; every write is still validated). Both are OPTIONAL and
+# default to empty = the built-in default (behavior is byte-identical). Clearing a
+# field RESETS it to the default.
+#   extra_instructions : appended to the built-in default (the safe, common path)
+#   prompt_override    : replaces the built-in instruction entirely (advanced)
+# Use a YAML BLOCK SCALAR ("|") for multi-line text (it preserves newlines):
+metadata:
+  provider: anthropic         # anthropic | openai | ollama
+  model: claude-sonnet-4-6    # cheap/fast for classification
+  # extra_instructions: |
+  #   Always format dates as YYYY-MM-DD.
+  #   Prefer my existing tags over inventing new ones.
+  # prompt_override: |        # advanced: replaces the built-in instruction text
+  #   You are classifying my household paperwork. Produce concise metadata.
+ocr:
+  provider: anthropic
+  model: claude-opus-4-8      # strong VISION model for re-OCR
+  # extra_instructions: |
+  #   Preserve tabular layout; keep column alignment where possible.
+  # prompt_override: |
+  #   Transcribe this scan verbatim. Output only the transcribed text.
+max_ocr_tokens: 8000
+
+# --- taxonomy policy (§7.2: reuse-first; I5) ------------------------------
+taxonomy_policy: reuse-first
+
+# --- review-gate tag names (§7.3) -----------------------------------------
+superseded_tag: superseded
+new_taxonomy_tag: ai-new-taxonomy
+# Created-taxonomy tag colors (prompt 011, cosmetic). Defaults shown.
+superseded_tag_color: "#a0a0a0"
+new_taxonomy_tag_color: "#f59e0b"
+
+# --- configurable custom-field / stage-option NAMES (prompt 011) ----------
+# Match the names you already use in Paperless. Defaults shown. CHANGING A NAME
+# means you must re-run `pa setup` (to provision the new name) and `pa doctor` (to
+# verify it). The resolver threads these everywhere, so setup/doctor/queries all
+# use the configured names consistently.
+field_names:
+  score: ocr_quality            # the OCR-quality (float) custom field
+  stage: ai_stage               # the ai_stage (select) custom field
+  notes: ai_notes               # the ai_notes (text) custom field
+stage_names:
+  triaged: triaged              # the ai_stage select-option labels
+  reocr_done: reocr_done
+  metadata_done: metadata_done
+
+# --- which ai_stage ROLES are metadata-eligible (prompt 011) --------------
+# Roles, not raw labels. "" = a doc with no stage yet. Default reproduces the
+# historical {none, "", triaged}. Add "reocr_done" to also run metadata on
+# re-OCR'd docs.
+metadata_eligible_roles: ["", "triaged"]
+
+# --- HTTP client: timeouts + pagination (prompt 011, for slow servers / big
+# PDFs / large libraries). Defaults shown, all byte-identical to the built-ins.
+http:
+  request_timeout: 90           # default per-request timeout (s)
+  download_timeout: 120         # download original PDF (s)
+  post_document_timeout: 180    # upload corrected PDF / consume (s)
+  task_poll_timeout: 180        # wait for the consume task (s)
+  task_poll_interval: 3         # poll cadence for the consume task (s)
+  page_size: 100                # document-list pagination size
+  # --- ADVANCED (retry/backoff) — see the "Advanced" section below --------
+  retries: 6                    # retry attempts on 429 / 5xx
+  backoff_initial: 1.0          # initial backoff (s)
+  backoff_cap: 30.0             # max backoff (s)
+
+# --- metadata content window + output tokens (prompt 011) -----------------
+# How much document text to send the model and the structured-output token cap.
+metadata_window:
+  content_head: 6000            # leading chars sent
+  content_tail: 1500            # trailing chars sent (long docs are head+...+tail)
+  max_tokens: 1024              # metadata structured-output token cap
+
+# --- on-ingest webhook NUDGE receiver (Phase 4, §6.2) ---------------------
+# OFF by default: the scheduled sweep above is AUTHORITATIVE. Enabling the webhook
+# just makes newly-consumed docs get processed within seconds, as a latency
+# optimisation layered on top. The receiver binds INSIDE the compose network and
+# publishes NO host port (do NOT add a `ports:` mapping). The shared secret comes
+# from the environment ONLY (PA_WEBHOOK_SECRET) - it must NOT be put here.
+webhook:
+  enabled: false                  # set true (or PA_WEBHOOK_ENABLED=true) to turn on
+  host: 0.0.0.0                   # bind so Paperless can reach it by service name
+  port: 8765                      # in-network port (NOT published to the host)
+  path: /hooks/paperless          # the single nudge endpoint
+  debounce_seconds: 30            # collapse rapid duplicate nudges for one doc
+  # secret: ...                   # REFUSED here - set PA_WEBHOOK_SECRET in the env
+
+# --- web dashboard (Phase 8) — PUBLISHED host port, token-protected -------
+# OFF by default. A browser dashboard (served by this same container) to observe +
+# operate the agent: view status/stats/runs/errors, start manual sweeps, and edit
+# these tunables. Enable it here (or PA_UI_ENABLED=true), or run `pa web`. UNLIKE
+# the agent + webhook, the UI is a DELIBERATELY-PUBLISHED host port — so it is
+# protected by a token that comes from the environment ONLY (PA_UI_TOKEN); it must
+# NOT go here. If enabled with no token, `pa` refuses to start (fail closed).
+ui:
+  enabled: false                  # set true (or PA_UI_ENABLED=true) to turn on
+  host: 0.0.0.0                   # bind so the PUBLISHED host port reaches the browser
+  port: 8770                      # container port; publish it with a compose `ports:` map
+  # token: ...                    # REFUSED here - set PA_UI_TOKEN in the env only
+
+# --- hosted mode (Phase 5/6, Mode B) — OUTBOUND-ONLY ----------------------
+# Only used when PA_MODE=hosted. The agent dials OUT to a vendor control plane and
+# pulls work; the control plane NEVER dials in (no host port, no inbound listener).
+# The enrollment token and the long-lived agent credential are SECRETS: they come
+# from the environment / /data ONLY (PA_ENROLLMENT_TOKEN), never this YAML.
+hosted:
+  # control_plane_url: https://control-plane.example   # non-secret; the endpoint you dial OUT to
+  # heartbeat_interval_seconds: 60
+  #
+  # --- Phase 6 HOSTED INFERENCE (subscriber, NO local AI key) --------------
+  # When true AND PA_MODE=hosted AND no local AI key is set, AI tasks route through
+  # the control-plane inference proxy (the vendor supplies inference, metered to
+  # your subscription and capped server-side). Keep a local AI key (or use local
+  # Ollama) instead to keep BYO/local — the zero-egress privacy floor.
+  # inference_enabled: false
+  # inference_metadata_model: ""    # optional non-secret model hint (no key here)
+  # inference_ocr_model: ""         # optional non-secret model hint
+  #
+  # TRUST MODEL (honest): with hosted inference ON, document CONTENTS transit the
+  # proxy for the model call ONLY and are NOT persisted server-side; logs record
+  # routing/usage metadata only. BYO-key with local Ollama is the zero-egress
+  # option. The vendor's model key stays server-side and never reaches the agent.
+
+# --- schedule + run behaviour (§7.3) --------------------------------------
+schedule_interval_seconds: 3600   # `pa serve` sweep interval
+# dry_run: false                  # omit for out-of-box safety: first run is a dry-run (I7)
+# force: false                    # re-process already-done docs
+# Per-run document cap (also PA_LIMIT env / --limit flag / dashboard General
+# settings). 0 = process all eligible docs; a positive N caps EACH stage to N
+# docs per run (a big backlog is then drained a batch per sweep). Default 0.
+limit: 0
+
+# --- storage (§8.1 /data layout) ------------------------------------------
+# data_dir: /data                 # snapshots, config, run reports, cursor
+snapshot_retention_days: 0        # 0 = keep snapshots forever
+
+# --- per-document activity / audit log (prompt 013) -----------------------
+# A searchable field-level before -> after record of exactly what the assistant
+# changed on each document (title / correspondent / type / tags / ocr_quality /
+# ai_stage / ai_notes / re-OCR supersessions), including PROPOSED changes for
+# dry-runs. Stored in SQLite at /data/activity.db, surfaced in the dashboard's
+# Activity tab (filter / search / paginate). It is OBSERVATIONAL — recording never
+# changes what is processed and never fails a document if the audit write fails.
+# Only REAL changes/proposals/errors are recorded (never skips/no-ops), so the log
+# stays meaningful AND bounded. No secret is ever stored here (doc metadata + the
+# non-secret Paperless URL only).
+activity_enabled: true            # set false (or PA_ACTIVITY_ENABLED=false) to turn off
+activity_retention_days: 90       # auto-purge rows older than this after each sweep;
+                                  # 0 = keep forever. Manual "Purge now" in the UI.
+
+# ==========================================================================
+# ADVANCED (prompt 011) — power-user tuning. The DEFAULTS reproduce today's
+# behavior EXACTLY. Misconfiguring these can degrade behavior. Everything below
+# is byte-identical when left at the defaults.
+# ==========================================================================
+#
+# garbage_score heuristic (ocr.py): decides which scans are flagged for re-OCR.
+# The default coefficients reproduce the stock scores byte-for-byte. Raising the
+# weights or thresholds changes what counts as a "garbage" scan (spend + rewrites).
+# garbage_heuristic:
+#   min_length: 40              # < this many stripped chars -> treated as empty (1.0)
+#   word_ratio_weight: 0.45     # weight of the alpha-char ratio
+#   plausible_weight: 0.45      # weight of the plausible-word ratio
+#   fragment_weight: 0.10       # weight of the fragment (short-avg-word) penalty
+#   fragment_threshold: 2.5     # avg word length below this triggers the penalty
+#   plausible_min_len: 3        # a "plausible" word needs at least this length + a vowel
+#
+# HTTP retry/backoff also lives under `http:` above (retries / backoff_initial /
+# backoff_cap) — those are the Advanced retry knobs. Too many retries can mask a
+# real Paperless outage.
+
+# --- delete originals: NEVER automated (§7.2, I4) -------------------------
+# delete_originals: true          # REFUSED - `pa` errors if you set this. Use the
+#                                 # `superseded` review set and delete manually.

@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Runtime artifacts (snapshots I2, corrected PDFs, run reports).
+# Also created empty at import time by the original reference scripts.
+snapshots/
+snapshots_stage1/
+snapshots_stage2/
+built_pdfs/
+_ignore/
+
+# Phase 3 /data volume (snapshots, config, run reports, logs, cursor, ledger).
+pa-data/
+pa-data-test/
+/data/
+
+# pytest
+.pytest_cache/
+
+# Secrets / environment (secrets are env-only by design; never commit them)
+.env
+*.env
+
+# Control-plane + agent state / credential files (may hold tokens; never commit)
+cp-state.json
+cp-billing.json
+cp-direct.json
+*-credential.json
+agent-credential.json
+
+# Internal Claude prompt-workflow artifacts (tooling, not product)
+prompts/
+
+# Personal / local-only files kept in the tree but never published
+# (e.g. the maintainer's export/backup/prune scripts). Not part of the product.
+local/

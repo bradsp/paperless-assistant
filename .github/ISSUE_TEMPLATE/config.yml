@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/bradsp/paperless-assistant/discussions
+    about: Ask a question, share a setup, or discuss ideas here rather than opening an issue.
+  - name: Security vulnerability (private)
+    url: https://github.com/bradsp/paperless-assistant/security/advisories/new
+    about: Please report security issues privately — do not open a public issue.
+  - name: Paperless-NGX (upstream)
+    url: https://docs.paperless-ngx.com/
+    about: Issues with Paperless-NGX itself belong upstream, not here.
