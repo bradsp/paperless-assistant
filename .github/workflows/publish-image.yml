@@ -91,3 +91,47 @@ jobs:
           # Speed up rebuilds via the GitHub Actions cache.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  release-package:
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive release tag + asset
+        id: package
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ASSET="paperless-assistant-${TAG}.tar.gz"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "asset=${ASSET}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release package
+        run: |
+          git archive \
+            --format=tar.gz \
+            --prefix="paperless-assistant-${{ steps.package.outputs.tag }}/" \
+            --output="${{ steps.package.outputs.asset }}" \
+            "${{ steps.package.outputs.tag }}"
+
+      - name: Ensure tag release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ steps.package.outputs.tag }}" >/dev/null 2>&1 || \
+            gh release create "${{ steps.package.outputs.tag }}" \
+              --title "${{ steps.package.outputs.tag }}" \
+              --verify-tag
+
+      - name: Upload release package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.package.outputs.tag }}" \
+            "${{ steps.package.outputs.asset }}" \
+            --clobber
