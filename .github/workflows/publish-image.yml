@@ -94,7 +94,7 @@ jobs:
 
   release-package:
     needs: build-and-push
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.build-and-push.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
