@@ -1,0 +1,39 @@
+# Paperless Assistant config for the throw-away Ollama re-OCR test.
+# Mounted read-only at /data/config.yml. Env vars in the compose file take
+# precedence for provider/model; this file drives the enabled stages + limits.
+#
+# NO SECRETS HERE (the loader refuses them) — the Paperless token is env-only.
+
+mode: conservative
+
+# Stages: triage (local, free) + re-OCR (Ollama vision — the path under test).
+# Metadata is OFF: moondream/llava structured JSON is unreliable and it isn't
+# what we're testing here.
+triage_enabled: true
+metadata_enabled: false
+reocr_enabled: true
+
+# Low thresholds so the local doc is easy to triage; the bootstrap additionally
+# forces the re-OCR queue with `reocr --threshold 0`.
+triage_threshold: 0.30
+garbage_threshold: 0.30
+
+workers: 2
+
+# Local inference is free, but the governor still needs non-zero caps.
+spend:
+  per_run: 1.00
+  per_period: 5.00
+  period: monthly
+
+# Redundant with the compose env (kept in sync) so `pa run` and `pa reocr`
+# resolve the same local provider/model.
+ocr:
+  provider: ollama
+  model: moondream          # override via OLLAMA_MODEL in .env + here if you change it
+metadata:
+  provider: ollama
+  model: moondream
+
+schedule_interval_seconds: 3600
+limit: 0

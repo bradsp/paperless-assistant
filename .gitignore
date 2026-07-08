@@ -36,6 +36,9 @@ agent-credential.json
 # Internal Claude prompt-workflow artifacts (tooling, not product)
 prompts/
 
+# Internal design docs (planning artifacts, not product; docs/ is the public set)
+plan/
+
 # Personal / local-only files kept in the tree but never published
 # (e.g. the maintainer's export/backup/prune scripts). Not part of the product.
 local/

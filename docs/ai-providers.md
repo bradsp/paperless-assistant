@@ -10,7 +10,7 @@ Three providers are supported, chosen **per task** (metadata vs. re-OCR):
 |----------|----------------------------|-----------------|-------|
 | **`anthropic`** *(default)* | `ANTHROPIC_API_KEY` | Yes | Forced tool-use structured output. |
 | **`openai`** | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` | Vision models only | Strict JSON-schema output. |
-| **`ollama`** | `PA_OLLAMA_ENDPOINT` (default `http://localhost:11434`) | llava-class only | **Local, zero-egress, no key.** |
+| **`ollama`** | `PA_OLLAMA_ENDPOINT` (default `http://localhost:11434`, the **root** — not a `/v1`/`/api` path) | llava-class only | **Local, zero-egress, no key.** Re-OCR needs the `[ollama]` extra (rasterizes PDFs). |
 
 > **Secrets are environment-only.** Provider keys go in your `.env` (beside
 > `docker-compose.yml`), never in a YAML config — the assistant refuses to load a
@@ -92,15 +92,16 @@ leaves your machine** — this is the zero-egress privacy floor.
 
 1. Install Ollama from <https://ollama.com/> (or run the official `ollama/ollama`
    Docker image as a service in your compose stack).
-2. Pull a model:
+2. Pull a model — it must be **pulled on the Ollama host** before use, or calls fail
+   with `model "…" not found, try pulling it first`:
 
    ```bash
    ollama pull llama3.1                 # good for metadata (text classification)
-   ollama pull llava                    # a vision model, required for re-OCR
+   ollama pull llava                    # a VISION model, required for re-OCR
    ```
 
-3. **Wire it in.** Ollama needs no key — just point the assistant at the endpoint.
-   In Docker, run an `ollama` service and target it by name:
+3. **Wire it in.** Ollama needs no key — just point the assistant at the endpoint
+   **root**. In Docker, run an `ollama` service and target it by name:
 
    ```yaml
        environment:
@@ -114,9 +115,33 @@ leaves your machine** — this is the zero-egress privacy floor.
    The default endpoint is `http://localhost:11434`; in Docker use the service name
    (e.g. `http://ollama:11434`).
 
+> **Point `PA_OLLAMA_ENDPOINT` at the Ollama ROOT.** The assistant speaks Ollama's
+> **native** API (`/api/generate`). Set the endpoint to the server root
+> (`http://host:11434`), **not** an OpenAI-compatible `/v1` base or an `/api` path —
+> those build a wrong URL and the server answers **405 Method Not Allowed** (the
+> assistant now says exactly this). A trailing `/v1` or `/api` is auto-stripped, but
+> the root form is the supported contract.
+
+**Re-OCR rasterizes PDFs — install the `[ollama]` extra.** Ollama's vision endpoint
+takes **raster images** (PNG/JPEG), not PDF containers, so for re-OCR the assistant
+renders each PDF page to a PNG before the call. This uses `pypdfium2` (pure-pip
+prebuilt wheels, **no system dependencies** — no poppler/ghostscript). The official
+Docker image bundles it; for a local install add the extra:
+
+```bash
+pip install paperless-assistant[ollama]     # httpx + pypdfium2
+```
+
+Metadata (text-only) does **not** need the renderer.
+
 **Re-OCR needs a llava-class vision model.** The adapter recognizes vision models by
 name (`llava`, `bakllava`, `llama3.2-vision`, `minicpm-v`, `moondream`, or a name
 containing `vision`). A non-vision model selected for re-OCR is refused at run time.
+
+**Check it before a run.** `pa doctor` verifies the endpoint shape and that the
+renderer is installed; add `pa doctor --probe-ollama` for a free, best-effort live
+check that the endpoint is reachable and the configured model is actually pulled (no
+inference, no spend).
 
 For maximum privacy, use Ollama for **both** tasks — no document data ever leaves your
 box.

@@ -71,7 +71,11 @@ options:
 - **Anthropic** (default): `claude-opus-4-8` — vision-capable out of the box.
 - **OpenAI**: a vision model such as `gpt-4o` / `gpt-4o-mini` / `gpt-4.1` / `gpt-4-turbo`.
 - **Ollama** (local, zero egress): a **llava-class** model (`llava`, `bakllava`,
-  `llama3.2-vision`, `minicpm-v`, `moondream`). Pull it first with `ollama pull llava`.
+  `llama3.2-vision`, `minicpm-v`, `moondream`). Pull it first with `ollama pull llava`,
+  point `PA_OLLAMA_ENDPOINT` at the Ollama **root** (e.g. `http://ollama:11434`, not a
+  `/v1` or `/api` path), and install the Ollama extra
+  (`pip install paperless-assistant[ollama]`) so the assistant can rasterize PDF pages
+  to images for the vision call. See [AI providers → Ollama](ai-providers.md#ollama-local--no-key-zero-cloud-egress).
 
 Set the model per task with `PA_OCR_PROVIDER` / `PA_OCR_MODEL`, or pick it in the
 [dashboard](dashboard.md). Full provider setup is in [AI providers](ai-providers.md).

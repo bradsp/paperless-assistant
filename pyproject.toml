@@ -45,10 +45,18 @@ openai = [
 ]
 ollama = [
     "httpx>=0.24",
+    # PDF -> PNG rasterization for Ollama vision re-OCR. Ollama's `images` field
+    # needs raster bytes, not a PDF container. pypdfium2 ships prebuilt wheels
+    # (bundled PDFium) so it stays pure-pip with NO system deps (no poppler/
+    # ghostscript), preserving the no-system-deps constraint (plan §4.2).
+    "pypdfium2>=4",
 ]
 test = [
     "pytest>=8.0",
     "responses>=0.25",
+    # Exercised by the Ollama re-OCR regression tests (PDF rasterization path).
+    "httpx>=0.24",
+    "pypdfium2>=4",
 ]
 
 [project.scripts]
