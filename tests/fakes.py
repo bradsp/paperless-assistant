@@ -339,29 +339,51 @@ def make_openai_provider(responder, **overrides):
 # Stub Ollama HTTP transport (no server, no real httpx post).
 # ===========================================================================
 class _OllamaResp:
-    def __init__(self, payload):
+    """Faithful-enough stand-in for an httpx.Response from Ollama. Carries the
+    `status_code` / `text` the improved error surfacing reads; `json()` returns
+    the decoded body (a success payload or an `{"error": ...}` object)."""
+
+    def __init__(self, payload, *, status_code=200, text=""):
         self._payload = payload
+        self.status_code = status_code
+        self.text = text
 
     def raise_for_status(self):
-        return None
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
 
     def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
         return self._payload
+
+
+def ollama_error(status_code, error=None, *, text=""):
+    """Build a stubbed Ollama HTTP error response mirroring the server's real
+    shape: `{"error": "..."}` with a >=400 status. Use as a responder return
+    value in `make_ollama_provider`."""
+    payload = {"error": error} if error is not None else None
+    return _OllamaResp(payload, status_code=status_code, text=text)
 
 
 def make_ollama_provider(responder, monkeypatch, **overrides):
     """Build an OllamaProvider whose httpx.post is stubbed. `responder(url,
-    json=...) -> payload dict`."""
+    json=...)` may return either a payload dict (wrapped as a 200 response) or a
+    ready `_OllamaResp` (e.g. from `ollama_error(...)`) to simulate an HTTP
+    failure with a body."""
     from paperless_assistant.providers import ollama as ol_mod
 
     kw = dict(ocr_model="llava:13b", metadata_model="llama3.1")
     kw.update(overrides)
     prov = ol_mod.OllamaProvider(**kw)
 
+    def _wrap(result):
+        return result if isinstance(result, _OllamaResp) else _OllamaResp(result)
+
     class _StubHttpx:
         @staticmethod
         def post(url, **kw):
-            return _OllamaResp(responder(url, **kw))
+            return _wrap(responder(url, **kw))
 
     monkeypatch.setattr(ol_mod, "_load_httpx", lambda: _StubHttpx)
     return prov

@@ -103,7 +103,7 @@ def _looks_like_admin(client) -> bool | None:
     return None
 
 
-def run_doctor(settings, client, *, check_providers=True) -> DoctorResult:
+def run_doctor(settings, client, *, check_providers=True, probe_ollama=False) -> DoctorResult:
     """Run all checks against a resolved `settings` + a PaperlessClient."""
     result = DoctorResult()
 
@@ -230,7 +230,7 @@ def run_doctor(settings, client, *, check_providers=True) -> DoctorResult:
 
     # --- 5. provider reachability / credentials --------------------------
     if check_providers:
-        _check_providers(result, settings)
+        _check_providers(result, settings, probe_ollama=probe_ollama)
 
     # --- 6. on-ingest webhook nudge config (Phase 4) ---------------------
     _check_webhook(result, settings)
@@ -270,10 +270,64 @@ def _check_webhook(result, settings):
     )
 
 
-def _check_providers(result, settings):
+def _probe_ollama_tags(result, settings, task, task_name):
+    """OPT-IN, best-effort live probe: hit Ollama's `/api/tags` (free, local, no
+    inference) to confirm the endpoint is reachable AND the configured model is
+    actually pulled. Any failure is a WARN, never a hard FAIL — the offline
+    capability checks remain authoritative (keeps the 'capability, not a live
+    network call' default philosophy). Only runs when explicitly requested."""
+    try:
+        import httpx  # type: ignore
+    except ImportError:  # pragma: no cover - gated by the httpx check above
+        return
+    endpoint = _ollama_root(settings.ollama_endpoint)
+    url = f"{endpoint}/api/tags"
+    try:
+        r = httpx.get(url, timeout=5)
+    except Exception as e:
+        result.add(
+            f"ollama-probe:{task_name}", WARN,
+            f"could not reach Ollama at {url}: {e}",
+            fix="Confirm the Ollama service is up and PA_OLLAMA_ENDPOINT is correct.",
+        )
+        return
+    if getattr(r, "status_code", 200) >= 400:
+        result.add(
+            f"ollama-probe:{task_name}", WARN,
+            f"Ollama /api/tags returned HTTP {r.status_code} at {url}.",
+            fix="Confirm PA_OLLAMA_ENDPOINT points at the Ollama root.",
+        )
+        return
+    try:
+        names = {m.get("name", "") for m in (r.json().get("models") or [])}
+    except Exception:
+        names = set()
+    want = task.model or ""
+    # Ollama tags are like 'llava:13b'; accept an exact match or a bare-name match.
+    pulled = want in names or any(n.split(":", 1)[0] == want for n in names)
+    if want and not pulled:
+        result.add(
+            f"ollama-probe:{task_name}", WARN,
+            f"model '{want}' is not among the pulled Ollama models ({sorted(names)}).",
+            fix=f"Run `ollama pull {want}` on the Ollama host.",
+        )
+    else:
+        result.add(f"ollama-probe:{task_name}", OK,
+                   f"Ollama reachable at {url}; model '{want}' is pulled.")
+
+
+def _ollama_root(endpoint: str) -> str:
+    """Mirror the adapter's endpoint normalization for the doctor probe."""
+    from .providers.ollama import _normalize_endpoint
+
+    return _normalize_endpoint(endpoint)
+
+
+def _check_providers(result, settings, *, probe_ollama=False):
     """Verify each SELECTED task provider has what it needs (credentials present /
-    endpoint configured). Capability, not a live network call - a live probe would
-    spend money / need a running Ollama."""
+    endpoint configured). Capability, not a live network call by default - a live
+    probe would need a running Ollama; the optional `/api/tags` probe (free, no
+    inference) is opt-in via `probe_ollama`."""
     tasks = [("metadata", settings.metadata_task)]
     if settings.reocr_enabled:
         tasks.append(("ocr", settings.ocr_task))
@@ -326,10 +380,38 @@ def _check_providers(result, settings):
                     fix="Use the official Docker image (it bundles httpx), or "
                         "`pip install paperless-assistant[ollama]`.",
                 )
+            elif task_name == "ocr" and not _package_installed("pypdfium2"):
+                # Re-OCR rasterizes PDFs to images before the vision call; without
+                # the renderer that call fails. Metadata (text-only) doesn't need it.
+                result.add(
+                    f"provider:{task_name}", FAIL,
+                    f"{task_name} uses ollama vision but the 'pypdfium2' renderer "
+                    f"isn't installed — re-OCR rasterizes PDF pages to images first.",
+                    fix="Use the official Docker image (it bundles pypdfium2), or "
+                        "`pip install paperless-assistant[ollama]`.",
+                )
             else:
-                result.add(f"provider:{task_name}", OK,
-                           f"{task_name}: ollama endpoint {settings.ollama_endpoint} "
-                           f"(local, zero-egress).")
+                # Cheap, no-network endpoint-shape check: catch the 405 class
+                # (a `/v1` OpenAI-compatible base or a stray `/api` path) BEFORE a
+                # run hits it. The adapter normalizes these, but a surprising URL is
+                # worth surfacing.
+                ep = str(settings.ollama_endpoint).strip().rstrip("/")
+                low = ep.lower()
+                if low.endswith("/v1") or low.endswith("/api") or "/v1/" in low:
+                    result.add(
+                        f"provider:{task_name}", WARN,
+                        f"{task_name}: PA_OLLAMA_ENDPOINT ('{settings.ollama_endpoint}') "
+                        f"looks like an OpenAI-compatible '/v1' base or an '/api' path. "
+                        f"Ollama's native API lives at the ROOT.",
+                        fix="Point PA_OLLAMA_ENDPOINT at the Ollama root "
+                            "(e.g. http://ollama:11434), not a /v1 or /api path.",
+                    )
+                else:
+                    result.add(f"provider:{task_name}", OK,
+                               f"{task_name}: ollama endpoint {settings.ollama_endpoint} "
+                               f"(local, zero-egress).")
+                if probe_ollama:
+                    _probe_ollama_tags(result, settings, task, task_name)
         else:
             result.add(
                 f"provider:{task_name}", FAIL,

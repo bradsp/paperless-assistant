@@ -334,7 +334,8 @@ def cmd_doctor(args):
         print(f"[FAIL] config: {e}", file=sys.stderr)
         raise SystemExit(2)
     client = PaperlessClient(settings.base_url, settings.paperless_token)
-    result = run_doctor(settings, client)
+    result = run_doctor(settings, client,
+                        probe_ollama=getattr(args, "probe_ollama", False))
 
     icon = {OK: "OK  ", WARN: "WARN", FAIL: "FAIL"}
     for c in result.checks:
@@ -571,6 +572,10 @@ def build_parser():
         "doctor", help="check connectivity, token scope, fields/tags, providers, config")
     p_doc.add_argument("--config", default=None, help="path to a YAML config file")
     p_doc.add_argument("--json", action="store_true", help="also print machine-readable JSON")
+    p_doc.add_argument(
+        "--probe-ollama", action="store_true",
+        help="best-effort live probe of the Ollama endpoint (/api/tags) to confirm "
+             "reachability and that the configured model is pulled (no inference, free)")
     p_doc.set_defaults(func=cmd_doctor)
 
     # -- Phase 3 sweep -----------------------------------------------------
