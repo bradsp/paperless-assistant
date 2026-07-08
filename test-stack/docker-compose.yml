@@ -1,0 +1,101 @@
+# Throw-away test stack for the Ollama vision re-OCR fix.
+#
+# Brings up Paperless-NGX (sqlite + redis), a local Ollama, and Paperless
+# Assistant BUILT FROM THIS REPO (so it carries the fix under test, incl.
+# pypdfium2 in the [ollama] extra). Everything is disposable:
+#
+#     docker compose --env-file .env down -v      # nukes it all
+#
+# The assistant service is behind the `agent` profile so `up` does NOT start a
+# sweep loop; the bootstrap script drives it with `docker compose run --rm`.
+#
+# NOTE: not for production. Admin creds are trivial, ports are published, and
+# the assistant runs against a throw-away library.
+
+name: pa-reocr-test
+
+services:
+  # --- Redis broker (required by Paperless) --------------------------------
+  broker:
+    image: docker.io/library/redis:7
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  # --- Paperless-NGX (sqlite: no separate DB service) ----------------------
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    depends_on:
+      - broker
+    ports:
+      - "${PAPERLESS_PORT:-8000}:8000"
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_SECRET_KEY: throwaway-not-a-secret
+      PAPERLESS_TIME_ZONE: ${TZ:-UTC}
+      PAPERLESS_URL: http://localhost:${PAPERLESS_PORT:-8000}
+      # Auto-create the superuser on first boot (bootstrap uses these to mint a token).
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER:-admin}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD:-admin}
+      # Windows/Docker-Desktop bind mounts don't deliver inotify events reliably;
+      # poll the consume dir instead so dropped files are always ingested.
+      PAPERLESS_CONSUMER_POLLING: "5"
+      # Keep OCR on (default) — we force re-OCR with `reocr --threshold 0`, so we
+      # don't depend on Paperless producing garbage text.
+    volumes:
+      - pngx_data:/usr/src/paperless/data
+      - pngx_media:/usr/src/paperless/media
+      - pngx_consume:/usr/src/paperless/consume
+    restart: unless-stopped
+
+  # --- Ollama (local vision inference) -------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"      # published only for convenience/debug
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    # GPU is optional and host-specific; CPU works (a small model like moondream
+    # keeps it usable). To use an NVIDIA GPU, uncomment the deploy block below.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # --- Paperless Assistant — BUILT FROM THIS REPO (the fix under test) ------
+  paperless-assistant:
+    build:
+      context: ..                          # repo root: Dockerfile installs [openai,ollama]
+      dockerfile: Dockerfile
+    image: paperless-assistant:reocr-test
+    profiles: ["agent"]                    # excluded from `up`; started via `run --rm`
+    depends_on:
+      - webserver
+      - ollama
+    environment:
+      PAPERLESS_URL: http://webserver:8000        # in-network service name
+      # PAPERLESS_TOKEN is injected per-invocation by bootstrap (`run -e ...`).
+      PA_MODE: byo-key
+      # Pin BOTH tasks to local Ollama so NO cloud key is ever required.
+      PA_OCR_PROVIDER: ollama
+      PA_OCR_MODEL: ${OLLAMA_MODEL:-moondream}
+      PA_METADATA_PROVIDER: ollama
+      PA_METADATA_MODEL: ${OLLAMA_MODEL:-moondream}
+      PA_OLLAMA_ENDPOINT: http://ollama:11434     # the FIXED code normalizes/validates this
+      PA_REOCR_ENABLED: "true"
+    volumes:
+      - pa_data:/data                             # snapshots, config, run reports
+      - ./config.yml:/data/config.yml:ro          # enabled stages + thresholds
+    # No `command:` needed — bootstrap passes the subcommand to `run --rm`.
+
+volumes:
+  redisdata:
+  pngx_data:
+  pngx_media:
+  pngx_consume:
+  ollama_models:
+  pa_data:
