@@ -94,7 +94,11 @@ jobs:
 
   release-package:
     needs: build-and-push
-    if: needs.build-and-push.result == 'success'
+    # Only for v*.*.* tag pushes — the same event that publishes a released
+    # image — so the source tarball coincides with each docker image release.
+    # A branch/PR/manual build has no version tag, so GITHUB_REF_NAME would be
+    # e.g. "main" and `gh release create --verify-tag` would abort.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
