@@ -12,7 +12,10 @@ provider.
 ## Prerequisites
 
 - A running **Paperless-NGX** stack managed by **docker compose** — i.e. you have a
-  `docker-compose.yml` with a `webserver` service.
+  `docker-compose.yml` with a `webserver` service. **Both the v2 line and the v3
+  beta are supported**; the assistant auto-detects which one you run at startup, so
+  there is nothing to configure for either (see [Paperless v2/v3](#paperless-ngx-v2v3)
+  below).
 - Shell access to the host running the stack.
 - An **AI API key** for your chosen provider (Anthropic by default). Local **Ollama**
   needs no key and sends nothing to any cloud. See [AI providers](ai-providers.md) for
@@ -160,6 +163,27 @@ specific version (e.g. `ghcr.io/bradsp/paperless-assistant:0.1.0`) instead of `:
 if you prefer controlled upgrades.
 
 To uninstall or roll back, see [troubleshooting → uninstalling](troubleshooting.md#uninstalling--rolling-back).
+
+---
+
+## Paperless-NGX v2/v3
+
+The assistant works against **both the Paperless-NGX v2 line and the v3 beta with
+no version setting**. At startup it reads the server's API version from the
+`X-Api-Version` response header and pins the request API version (`version=9`) that
+both generations accept, so every REST call behaves the same on either. If a server
+never advertises its version, it falls back to the tested v2 path and logs that it
+did — it never fails closed. `pa doctor` prints the detected generation as a
+`paperless-version` check.
+
+You can point one assistant deployment at a mix of v2 and v3 instances; each client
+detects and adapts independently.
+
+> **When you upgrade a Paperless server from v2 to v3:** v3 makes
+> `PAPERLESS_SECRET_KEY` **mandatory**. If your upgrade sets or rotates that secret,
+> Paperless **invalidates existing API tokens** — the assistant will then see a
+> `401` (`pa doctor` reports it clearly). Reissue the API token in the Paperless UI
+> and update `PAPERLESS_TOKEN`. Nothing else changes.
 
 ---
 

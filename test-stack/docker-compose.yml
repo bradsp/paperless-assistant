@@ -24,7 +24,12 @@ services:
 
   # --- Paperless-NGX (sqlite: no separate DB service) ----------------------
   webserver:
-    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    # Image tag is selectable so you can exercise the assistant against either
+    # generation WITHOUT changing code: it auto-detects v2 vs v3 at runtime and
+    # pins the request API version (version=9) that both honor. Default is the
+    # current STABLE (v2 line); set PA_PAPERLESS_IMAGE to a v3 beta tag (e.g.
+    # ghcr.io/paperless-ngx/paperless-ngx:beta) to smoke-test v3. See .env.example.
+    image: ${PA_PAPERLESS_IMAGE:-ghcr.io/paperless-ngx/paperless-ngx:latest}
     depends_on:
       - broker
     ports:

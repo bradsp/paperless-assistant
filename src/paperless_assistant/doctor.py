@@ -147,6 +147,23 @@ def run_doctor(settings, client, *, check_providers=True, probe_ollama=False) ->
         _add_config_summary(result, settings)
         return result
 
+    # --- 1b. detected Paperless API generation (v2 vs v3) ----------------
+    # The connectivity probe above already made an authenticated request, so the
+    # client has auto-detected the server's API version from its response headers
+    # (no extra round-trip). We send `Accept: ...; version=9`, which BOTH v2 and
+    # v3-beta honor, so either generation works with no user configuration.
+    api_version = getattr(client, "api_version", None)
+    if api_version is not None:
+        generation = getattr(client, "server_generation", "v2")
+        server_version = getattr(client, "server_version", None)
+        ver_str = f" (server {server_version})" if server_version else ""
+        result.add(
+            "paperless-version", OK,
+            f"Detected Paperless {generation} — API v{api_version}{ver_str}. "
+            f"Requests are pinned to API version 9 (honored by both v2 and v3), "
+            f"so this instance is supported with no version setting required.",
+        )
+
     # --- 2. token scope (admin warning, connectivity §4) -----------------
     admin = _looks_like_admin(client)
     if admin is True:

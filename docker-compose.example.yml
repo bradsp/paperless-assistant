@@ -11,6 +11,11 @@
 # NOTE: there is deliberately NO `ports:` mapping - the agent exposes nothing to
 # the host. It is outbound-only (talks to Paperless on the LAN and, in BYO-key
 # mode, to your chosen AI provider).
+#
+# COMPATIBILITY: works with Paperless-NGX v2 AND v3 (beta) with no version setting
+# - the assistant auto-detects the server's API generation at runtime and adapts.
+# (v3 makes PAPERLESS_SECRET_KEY mandatory; if it's rotated on upgrade, reissue the
+# API token below - existing tokens are invalidated.)
 
 services:
   paperless-assistant:
