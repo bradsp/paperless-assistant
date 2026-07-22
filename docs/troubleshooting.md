@@ -17,6 +17,7 @@ docker compose exec paperless-assistant pa doctor --json   # machine-readable
 |---------|--------------------|
 | `pa doctor` **connectivity FAIL** | `PAPERLESS_URL` wrong or Paperless not reachable on the compose network. In-stack use `http://webserver:8000` (match your service name). |
 | Auth error / **token rejected** | `PAPERLESS_TOKEN` invalid. Recreate the API token; ensure it's in `.env` and referenced in the compose `environment:`. |
+| **Token rejected right after a v2→v3 upgrade** | Paperless v3 requires `PAPERLESS_SECRET_KEY`; if the upgrade set/rotated it, **all existing API tokens are invalidated**. Reissue the token in the Paperless UI and update `PAPERLESS_TOKEN`. The assistant itself needs no version change — it auto-detects v2 vs v3. |
 | **`token-scope` WARN** (admin token) | You're using an admin token. Create a scoped **service user** and use its token (see [Installation → Step 1](installation.md#step-1--create-a-scoped-paperless-api-token-recommended)). Not fatal. |
 | A required field is **missing** / wrong type | Run `pa setup`. If it reports an **incompatible** existing field, rename/delete that field in the Paperless UI, then re-run `pa setup`. Nothing is ever clobbered. |
 | **`provider:metadata` FAIL — key not set** | Set the selected provider's key in `.env` (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`), or switch `PA_METADATA_PROVIDER` to local `ollama`. See [AI providers](ai-providers.md). |

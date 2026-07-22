@@ -170,14 +170,16 @@ class Sweep:
         # (e.g. the Phase 6 hosted-inference context the HostedAgent injects). When
         # omitted we project it from settings exactly as before.
         self.cfg = cfg if cfg is not None else settings.to_config()
-        # Prompt 011: pass the configured HTTP tunables (timeouts / pagination /
-        # retry) to the client (defaults byte-identical).
-        self.client = client or PaperlessClient(
-            self.cfg.base_url, self.cfg.paperless_token, http=settings.http)
         self.data = settings.data_path
         self.logger = logger or JsonLogger(
             path=str(self.data("logs", "pa.jsonl"))
         )
+        # Prompt 011: pass the configured HTTP tunables (timeouts / pagination /
+        # retry) to the client (defaults byte-identical). The logger is wired in
+        # so the auto-detected Paperless API generation (v2/v3) is recorded once.
+        self.client = client or PaperlessClient(
+            self.cfg.base_url, self.cfg.paperless_token, http=settings.http,
+            logger=self.logger)
         self.cursor = Cursor(str(self.data("cursor.json")))
         self.ledger = SpendLedger(
             str(self.data("spend-ledger.json")), period=settings.spend.period

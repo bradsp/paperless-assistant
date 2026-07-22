@@ -77,6 +77,30 @@ docker compose exec ollama ollama pull llava:7b
 ./bootstrap.ps1 -SkipModelPull:$false
 ```
 
+## Test against Paperless v3 (beta)
+
+The assistant supports **both** the Paperless-NGX v2 line and the v3 beta and
+**auto-detects** which one it's talking to at runtime — there is no version
+setting to configure. It pins the request API version (`Accept: application/json;
+version=9`), which both generations honor, so every surface it uses behaves
+identically on either server.
+
+To bring the stack up on v3 instead of the default stable (v2), point
+`PA_PAPERLESS_IMAGE` at a v3 beta tag in `.env`:
+
+```powershell
+# in .env:
+PA_PAPERLESS_IMAGE=ghcr.io/paperless-ngx/paperless-ngx:beta
+# or pin a specific beta: ...:v3.0.0-beta.rc2
+./bootstrap.ps1
+```
+
+- `pa doctor` prints a `paperless-version` check showing the detected generation
+  (e.g. `Detected Paperless v3 — API v10 …`), confirming which path is active.
+- v3 makes `PAPERLESS_SECRET_KEY` **mandatory**; this stack already sets one, so
+  v3 boots. On a real v3 upgrade, rotating that secret **invalidates existing API
+  tokens** — you must reissue the token (and update `PAPERLESS_TOKEN`).
+
 ## Explore
 
 - Paperless UI: <http://localhost:8000> (login `admin` / `admin`).

@@ -52,6 +52,24 @@ These safety properties are enforced as engine invariants (I1–I7); see
   interval, or process freshly-consumed documents within seconds.
 - **Optional token-protected web dashboard** — run status, spend-vs-cap, and review
   queues; start a manual sweep and edit config from the browser.
+- **Works with Paperless-NGX v2 and v3 (beta)** — the assistant auto-detects your
+  server's API generation at runtime and adapts automatically. No version setting
+  to configure, and a single deployment can point at a mix of v2 and v3 instances.
+
+## Paperless-NGX compatibility
+
+Paperless Assistant supports **both the Paperless-NGX v2 line and the v3 beta**,
+with **no configuration required**: it detects the server's API version at runtime
+(from the `X-Api-Version` response header) and pins the request API version that
+both generations honor, so every REST surface behaves identically on either. If a
+server doesn't advertise its version, the assistant falls back to the known-good v2
+path (it never fails closed) and logs which path is active. Run `pa doctor` to see
+the detected generation.
+
+> **Upgrading a Paperless server to v3?** v3 makes `PAPERLESS_SECRET_KEY`
+> **mandatory**. If the secret is rotated during the upgrade, existing API tokens
+> are **invalidated** — reissue the token and update `PAPERLESS_TOKEN`. No other
+> action is needed on the assistant side.
 
 ## Quick start
 

@@ -93,3 +93,145 @@ def test_find_new_doc_by_task_failure_raises(monkeypatch):
     responses.add(responses.GET, f"{BASE}/api/tasks/", json=[{"status": "FAILURE"}])
     with pytest.raises(RuntimeError):
         _client().find_new_doc_by_task("task-x", timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# Paperless v2 + v3 compatibility: version=9 Accept pin, auto-detection, and
+# defensive tasks parsing across the v9 (bare list) and v10 (paginated) shapes.
+# ---------------------------------------------------------------------------
+class _RecordingLogger:
+    """Minimal stand-in for obs.JsonLogger capturing emitted events."""
+
+    def __init__(self):
+        self.events = []
+
+    def event(self, event, level="info", **fields):
+        rec = {"event": event, "level": level, **fields}
+        self.events.append(rec)
+        return rec
+
+
+@responses.activate
+def test_accept_header_pins_api_version_9():
+    # Requirement 1: every request must carry `Accept: application/json; version=9`
+    # so v2 and v3 servers both serve the v9-shaped responses this client parses.
+    url = f"{BASE}/api/ui_settings/"
+    responses.add(responses.GET, url, json={"user": {}}, status=200)
+    _client().request("GET", url)
+    assert responses.calls[0].request.headers["Accept"] == "application/json; version=9"
+
+
+@responses.activate
+def test_detects_v2_from_x_api_version_9():
+    url = f"{BASE}/api/ui_settings/"
+    responses.add(responses.GET, url, json={"user": {}}, status=200,
+                  headers={"X-Api-Version": "9", "X-Version": "2.20.15"})
+    log = _RecordingLogger()
+    c = PaperlessClient(BASE, "tok", logger=log)
+    c.request("GET", url)
+    assert c.api_version == 9
+    assert c.is_v3 is False
+    assert c.server_generation == "v2"
+    assert c.server_version == "2.20.15"
+    ev = [e for e in log.events if e["event"] == "paperless_version_detected"]
+    assert len(ev) == 1
+    assert ev[0]["detected"] is True
+    assert ev[0]["generation"] == "v2"
+
+
+@responses.activate
+def test_detects_v3_from_x_api_version_10():
+    url = f"{BASE}/api/ui_settings/"
+    responses.add(responses.GET, url, json={"user": {}}, status=200,
+                  headers={"X-Api-Version": "10", "X-Version": "3.0.0-beta"})
+    log = _RecordingLogger()
+    c = PaperlessClient(BASE, "tok", logger=log)
+    c.request("GET", url)
+    assert c.api_version == 10
+    assert c.is_v3 is True
+    assert c.server_generation == "v3"
+    ev = [e for e in log.events if e["event"] == "paperless_version_detected"]
+    assert len(ev) == 1
+    assert ev[0]["detected"] is True
+    assert ev[0]["generation"] == "v3"
+
+
+@responses.activate
+def test_missing_header_falls_back_to_v2_and_logs():
+    # Requirement 2: absent/inconclusive header -> default to the v2/API-v9
+    # known-good path (never fail closed, never silently assume v3) + log it once.
+    url = f"{BASE}/api/ui_settings/"
+    responses.add(responses.GET, url, json={"user": {}}, status=200)  # no headers
+    log = _RecordingLogger()
+    c = PaperlessClient(BASE, "tok", logger=log)
+    c.request("GET", url)
+    assert c.api_version == 9  # fallback
+    assert c.server_generation == "v2"
+    ev = [e for e in log.events if e["event"] == "paperless_version_detected"]
+    assert len(ev) == 1
+    assert ev[0]["detected"] is False
+    assert ev[0]["generation"] == "v2"
+
+
+@responses.activate
+def test_version_detection_is_cached_not_recomputed(monkeypatch):
+    # Detected once, then cached: a later header change does not re-detect.
+    url = f"{BASE}/api/ui_settings/"
+    responses.add(responses.GET, url, json={"user": {}}, status=200,
+                  headers={"X-Api-Version": "9"})
+    responses.add(responses.GET, url, json={"user": {}}, status=200,
+                  headers={"X-Api-Version": "10"})
+    log = _RecordingLogger()
+    c = PaperlessClient(BASE, "tok", logger=log)
+    c.request("GET", url)
+    c.request("GET", url)
+    assert c.api_version == 9  # first detection wins; never recomputed
+    ev = [e for e in log.events if e["event"] == "paperless_version_detected"]
+    assert len(ev) == 1  # logged exactly once
+
+
+@responses.activate
+def test_find_new_doc_by_task_v9_bare_list(monkeypatch):
+    # v9 shape: bare list, `related_document` int (the pin restores this on v3).
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    responses.add(responses.GET, f"{BASE}/api/tasks/",
+                  json=[{"status": "SUCCESS", "related_document": 321, "result": "321"}])
+    assert _client().find_new_doc_by_task("task-x", timeout=5) == 321
+
+
+@responses.activate
+def test_find_new_doc_by_task_v10_paginated_renamed(monkeypatch):
+    # v10 shape: paginated dict + `related_document_ids` list, no `related_document`.
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    responses.add(
+        responses.GET, f"{BASE}/api/tasks/",
+        json={
+            "count": 1, "next": None, "previous": None,
+            "results": [{
+                "status": "SUCCESS",
+                "related_document_ids": [654],
+                "result_data": {"document_id": 654},
+            }],
+        },
+    )
+    assert _client().find_new_doc_by_task("task-x", timeout=5) == 654
+
+
+@responses.activate
+def test_find_new_doc_by_task_v10_result_data_only(monkeypatch):
+    # v10 fallback path: only result_data.document_id present.
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    responses.add(
+        responses.GET, f"{BASE}/api/tasks/",
+        json={"results": [{"status": "SUCCESS", "result_data": {"document_id": 99}}]},
+    )
+    assert _client().find_new_doc_by_task("task-x", timeout=5) == 99
+
+
+@responses.activate
+def test_find_new_doc_by_task_v10_paginated_failure_raises(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    responses.add(responses.GET, f"{BASE}/api/tasks/",
+                  json={"results": [{"status": "FAILURE"}]})
+    with pytest.raises(RuntimeError):
+        _client().find_new_doc_by_task("task-x", timeout=5)

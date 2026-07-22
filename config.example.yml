@@ -9,6 +9,11 @@
 # anthropic_api_key, openai_api_key, agent_token, token, secret).
 #
 # Every value below is OPTIONAL - omitting it keeps the safe default (§7.2).
+#
+# PAPERLESS VERSION: there is NO version setting. The assistant supports both
+# Paperless-NGX v2 and the v3 beta and auto-detects which one it's talking to at
+# runtime (via the server's X-Api-Version header), adapting automatically. Run
+# `pa doctor` to see the detected generation.
 
 # --- external URL for browser links ---------------------------------------
 # The agent talks to Paperless over the LAN via PAPERLESS_URL (e.g.
